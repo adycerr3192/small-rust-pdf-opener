@@ -77,12 +77,12 @@ flowchart LR
 
 ```mermaid
 flowchart LR
-  Src[Rust sources] --> Cargo[cargo build --release]
+  Src[Rust sources] --> Cargo["cargo build --release"]
   Cargo --> Bin[pdf-opener binary]
-  Bin --> App[PDF Opener.app]
-  Icon[AppIcon.icns] --> App
-  App --> Dmg[DMG installer]
-  Dmg --> Apps[/Applications]
+  Bin --> AppBundle["PDF Opener.app"]
+  Icon[AppIcon.icns] --> AppBundle
+  AppBundle --> Dmg[DMG installer]
+  Dmg --> AppsFolder["Applications folder"]
 ```
 
 ## Features
