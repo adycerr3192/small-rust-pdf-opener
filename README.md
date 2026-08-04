@@ -99,9 +99,20 @@ flowchart LR
 
 Out of scope (on purpose): full annotation suites, forms designer, PDF/A conversion, cloud sync.
 
-## Try it
+## Install (macOS)
 
-See [Build & run](#build--run) below. Quickest path on a Mac with Rust installed:
+Apple Silicon, via [Homebrew](https://brew.sh):
+
+```bash
+brew tap will702/tap
+brew install --cask pdf-opener
+```
+
+Or grab the DMG from [Releases](https://github.com/will702/small-rust-pdf-opener/releases).
+
+## Try it from source
+
+See [Build & run](#build--run) below. Quickest path with Rust installed:
 
 ```bash
 cargo run --release -- ./testdata/hello.pdf
