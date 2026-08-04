@@ -139,7 +139,9 @@ cargo run --release -- ./testdata/hello.pdf
 ./packaging/build-dmg.sh
 ```
 
-Produces `dist/PDF Opener.app` and `dist/PDF-Opener-0.1.0.dmg`. Drag into Applications. If Gatekeeper blocks: right-click → **Open** (adhoc-signed local build).
+Produces `dist/PDF Opener.app` and `dist/PDF-Opener-<version>.dmg`. Drag into Applications. If Gatekeeper blocks: right-click → **Open** (adhoc-signed local build).
+
+**GitHub Actions:** every `v*` tag / published Release (and manual **Release DMG** workflow dispatch) builds the DMG on `macos-latest` and uploads it to the release assets.
 
 ## Usage cheatsheet
 

@@ -5,12 +5,23 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 DIST="$ROOT/dist"
 APP="$DIST/PDF Opener.app"
-DMG="$DIST/PDF-Opener-0.1.0.dmg"
 VOL="PDF Opener"
 STAGE="$DIST/dmg-stage"
 
 export CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-$ROOT/target}"
 
+# Version: PDF_OPENER_VERSION env, else Cargo.toml, else 0.0.0
+if [[ -n "${PDF_OPENER_VERSION:-}" ]]; then
+  VERSION="$PDF_OPENER_VERSION"
+else
+  VERSION="$(sed -n 's/^version = "\(.*\)"/\1/p' "$ROOT/Cargo.toml" | head -1)"
+  VERSION="${VERSION:-0.0.0}"
+fi
+# Strip leading v if present
+VERSION="${VERSION#v}"
+DMG="$DIST/PDF-Opener-${VERSION}.dmg"
+
+echo "==> Version $VERSION"
 echo "==> Building release binary"
 (cd "$ROOT" && cargo build --release)
 
@@ -20,20 +31,29 @@ if [[ ! -x "$BIN" ]]; then
   exit 1
 fi
 
+# Ensure AppIcon.icns exists (CI / fresh clones)
+ICNS="$ROOT/packaging/AppIcon.icns"
+if [[ ! -f "$ICNS" ]]; then
+  if [[ -f "$ROOT/dist/AppIcon.icns" ]]; then
+    cp "$ROOT/dist/AppIcon.icns" "$ICNS"
+  else
+    echo "==> Generating AppIcon.icns"
+    bash "$ROOT/packaging/make-icon.sh"
+  fi
+fi
+
 echo "==> Assembling app bundle"
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$ROOT/packaging/Info.plist" "$APP/Contents/Info.plist"
+# Stamp version into Info.plist copy
+/usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $VERSION" "$APP/Contents/Info.plist" 2>/dev/null \
+  || true
+/usr/libexec/PlistBuddy -c "Set :CFBundleVersion $VERSION" "$APP/Contents/Info.plist" 2>/dev/null \
+  || true
 cp "$BIN" "$APP/Contents/MacOS/pdf-opener"
 chmod +x "$APP/Contents/MacOS/pdf-opener"
-
-if [[ -f "$ROOT/dist/AppIcon.icns" ]]; then
-  cp "$ROOT/dist/AppIcon.icns" "$APP/Contents/Resources/AppIcon.icns"
-elif [[ -f "$APP/Contents/Resources/AppIcon.icns" ]]; then
-  :
-else
-  echo "Warning: AppIcon.icns missing — run packaging/make-icon.sh first" >&2
-fi
+cp "$ICNS" "$APP/Contents/Resources/AppIcon.icns"
 
 # Ad-hoc sign so Gatekeeper is less angry for local installs
 codesign --force --deep --sign - "$APP" 2>/dev/null || true
