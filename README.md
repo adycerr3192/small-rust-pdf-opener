@@ -1,9 +1,14 @@
 # Small Rust PDF Opener
 
+<p align="center">
+  <img src="docs/images/banner-hero.png" alt="Small Rust PDF Opener — local-first PDF viewer and editor in Rust" width="100%">
+</p>
+
 > Fast, local-first PDF viewer and light editor in **Rust** — open, scroll, edit pages, compress, sign, and OCR **without uploading your documents**.
 
 [![License: AGPL v3](https://img.shields.io/badge/License-AGPL%20v3-blue.svg)](LICENSE)
 [![Rust](https://img.shields.io/badge/rust-1.85%2B-orange.svg)](https://www.rust-lang.org/)
+[![Release](https://img.shields.io/github/v/release/will702/small-rust-pdf-opener)](https://github.com/will702/small-rust-pdf-opener/releases)
 [![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-lightgrey.svg)](#build--run)
 
 **Keywords:** `rust` `pdf` `pdf-viewer` `pdf-editor` `egui` `mupdf` `ocr` `local-ocr` `pdf-sign` `pkcs12` `lightweight` `desktop-app` `privacy` `offline`
@@ -13,6 +18,72 @@
 ## Why this exists
 
 Most PDF tools are either heavy suites or cloud uploaders. **Small Rust PDF Opener** is a single native binary that stays on your machine: view quickly, do a few useful edits, compress, stamp a signature, optionally certify with a PKCS#12 key, and run OCR after you choose to download local models.
+
+## Architecture at a glance
+
+<p align="center">
+  <img src="docs/images/architecture-diagram.png" alt="Architecture: egui UI, Document Session, MuPDF, OCR, Sign" width="90%">
+</p>
+
+### Runtime data flow
+
+```mermaid
+flowchart TB
+  User[User] --> UI[egui Desktop UI]
+  UI --> Session[DocumentSession]
+  Session --> MuPDF[MuPDF Engine]
+  MuPDF --> Render[Page RGBA textures]
+  Render --> Scroll[Continuous scroll viewer]
+  Session --> Edit[Delete Rotate Reorder Crop]
+  Session --> Compress[Compress presets]
+  UI --> OCR[OCR module]
+  OCR -->|opt-in download| Models[Local ocrs models cache]
+  OCR --> TextLayer[Invisible searchable text]
+  UI --> VisualSign[Visual signature stamp]
+  UI --> CertSign[PKCS12 to PKCS7]
+  CertSign --> Lopdf[lopdf AcroForm Sig]
+  Edit --> MuPDF
+  Compress --> MuPDF
+  TextLayer --> MuPDF
+  VisualSign --> MuPDF
+```
+
+### Typical user journeys
+
+```mermaid
+flowchart LR
+  subgraph view [View]
+    A1[Open PDF] --> A2[Scroll / zoom / search]
+  end
+  subgraph edit [Edit]
+    B1[Select page] --> B2[Delete or rotate or crop]
+    B2 --> B3[Save As]
+  end
+  subgraph sign [Sign]
+    C1[Draw or import mark] --> C2[Place on page]
+    C3[Load P12] --> C4[Drag signature rect]
+    C4 --> C5[Write signed PDF]
+  end
+  subgraph ocrFlow [OCR]
+    D1[Download models once] --> D2[OCR page]
+    D2 --> D3[Searchable text layer]
+  end
+  view --> edit
+  edit --> sign
+  edit --> ocrFlow
+```
+
+### Build / package pipeline
+
+```mermaid
+flowchart LR
+  Src[Rust sources] --> Cargo[cargo build --release]
+  Cargo --> Bin[pdf-opener binary]
+  Bin --> App[PDF Opener.app]
+  Icon[AppIcon.icns] --> App
+  App --> Dmg[DMG installer]
+  Dmg --> Apps[/Applications]
+```
 
 ## Features
 
@@ -28,15 +99,13 @@ Most PDF tools are either heavy suites or cloud uploaders. **Small Rust PDF Open
 
 Out of scope (on purpose): full annotation suites, forms designer, PDF/A conversion, cloud sync.
 
-## Screenshots / demo
+## Try it
 
-Open any PDF from the toolbar or:
+See [Build & run](#build--run) below. Quickest path on a Mac with Rust installed:
 
 ```bash
-cargo run --release -- path/to/file.pdf
+cargo run --release -- ./testdata/hello.pdf
 ```
-
-macOS: install from the DMG (see below) and launch **PDF Opener** from Applications.
 
 ## Requirements
 
@@ -96,6 +165,7 @@ src/
   sign/            visual pad + PKCS#12 / PKCS#7 signing
 packaging/         Info.plist + build-dmg.sh
 assets/            app icons
+docs/images/       README banner + architecture art
 testdata/          sample PDF
 ```
 
