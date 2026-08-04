@@ -1,0 +1,44 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it as below."
+type: software
+title: "Small Rust PDF Opener"
+abstract: >-
+  A local-first, lightweight PDF viewer and editor written in Rust using MuPDF
+  and egui. Supports continuous scrolling, page edits (delete, rotate, reorder,
+  crop), compression, visual signatures, PKCS#12 certificate signing, and
+  optional offline OCR via downloadable ocrs models.
+authors:
+  - name: "will702"
+    alias: "Willson"
+repository-code: "https://github.com/will702/small-rust-pdf-opener"
+url: "https://github.com/will702/small-rust-pdf-opener"
+license: AGPL-3.0-only
+version: 0.1.0
+date-released: "2026-08-04"
+keywords:
+  - rust
+  - pdf
+  - pdf-viewer
+  - pdf-editor
+  - egui
+  - mupdf
+  - ocr
+  - offline
+  - privacy
+  - desktop
+references:
+  - type: software
+    title: MuPDF
+    url: "https://mupdf.com/"
+  - type: software
+    title: egui
+    url: "https://github.com/emilk/egui"
+  - type: software
+    title: ocrs
+    url: "https://github.com/robertknight/ocrs"
+  - type: software
+    title: lopdf
+    url: "https://crates.io/crates/lopdf"
+  - type: software
+    title: OpenSSL
+    url: "https://www.openssl.org/"

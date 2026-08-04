@@ -1,0 +1,12 @@
+# Ignore build / local artifacts
+/target/
+/dist/
+**/*.rs.bk
+.DS_Store
+*.pdb
+.env
+.cursor/
+testdata/*.signed.pdf
+testdata/*.compressed.pdf
+*.dmg
+AppIcon.iconset/

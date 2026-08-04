@@ -1,0 +1,25 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  check:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install build deps
+        run: |
+          # clang comes with the runner; ensure xcode tools available
+          xcode-select -p
+      - name: cargo check
+        run: cargo check --locked
+        env:
+          CARGO_TARGET_DIR: ${{ github.workspace }}/target

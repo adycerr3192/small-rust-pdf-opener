@@ -1,0 +1,36 @@
+[package]
+name = "pdf-opener"
+version = "0.1.0"
+edition = "2021"
+description = "Small Rust PDF Opener — local-first viewer/editor with scroll, crop, compress, visual + PKCS#12 signing, and opt-in offline OCR"
+license = "AGPL-3.0-only"
+readme = "README.md"
+repository = "https://github.com/will702/small-rust-pdf-opener"
+homepage = "https://github.com/will702/small-rust-pdf-opener"
+documentation = "https://github.com/will702/small-rust-pdf-opener#readme"
+keywords = ["pdf", "viewer", "editor", "ocr", "egui"]
+categories = ["multimedia", "gui", "command-line-utilities"]
+authors = ["will702"]
+
+[dependencies]
+eframe = "0.35"
+egui = "0.35"
+egui_extras = { version = "0.35", features = ["file", "image"] }
+mupdf = { version = "0.8", default-features = false, features = ["base14-fonts", "system-fonts"] }
+lopdf = "0.34"
+rfd = "0.15"
+image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
+dirs = "6"
+ureq = "2.12"
+anyhow = "1"
+thiserror = "2"
+parking_lot = "0.12"
+rten = "0.21"
+rten-imageproc = "0.21"
+ocrs = "0.10"
+openssl = { version = "0.10", features = ["vendored"] }
+
+[profile.release]
+lto = true
+codegen-units = 1
+strip = true

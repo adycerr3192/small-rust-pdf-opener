@@ -1,0 +1,60 @@
+# Third-party notices — Small Rust PDF Opener
+
+This file attributes the open-source components used by this project.
+Upstream licenses and copyrights remain with their respective authors.
+
+## MuPDF (via mupdf / mupdf-sys)
+
+- Project: https://mupdf.com/
+- Rust bindings: https://github.com/messense/mupdf-rs
+- License: GNU Affero General Public License v3.0 (AGPL-3.0)
+- Used for: PDF rendering, page delete/rotate/reorder/crop, compression write options, image stamp helpers
+
+**Important:** MuPDF’s AGPL terms require that this combined work also be distributed under AGPL-3.0 when you convey it.
+
+## egui / eframe
+
+- Project: https://github.com/emilk/egui
+- License: MIT OR Apache-2.0
+- Used for: desktop UI (viewer, toolbars, dialogs)
+
+## ocrs / rten / rten-imageproc
+
+- Project: https://github.com/robertknight/ocrs
+- Models: https://github.com/robertknight/ocrs-models
+- Default model URLs (downloaded only when the user requests):  
+  - https://ocrs-models.s3-accelerate.amazonaws.com/text-detection.rten  
+  - https://ocrs-models.s3-accelerate.amazonaws.com/text-recognition.rten
+- License: MIT OR Apache-2.0 (library); check model repository for model terms
+- Used for: optional local OCR and searchable text layer
+
+## lopdf
+
+- Project: https://crates.io/crates/lopdf
+- License: MIT
+- Used for: PDF object surgery for certificate signature fields / AcroForm
+
+## openssl (Rust crate, vendored OpenSSL)
+
+- Crate: https://crates.io/crates/openssl
+- OpenSSL: https://www.openssl.org/
+- License: Apache-2.0 (crate); OpenSSL license / Apache-2.0 depending on vendored version
+- Used for: PKCS#12 import and PKCS#7 detached signatures
+
+## Other crates
+
+| Crate | Typical use | License (see crates.io) |
+|-------|-------------|-------------------------|
+| rfd | Native file dialogs | MIT |
+| image | PNG/JPEG encode/decode | MIT OR Apache-2.0 |
+| dirs | Cache directory paths | MIT OR Apache-2.0 |
+| ureq | HTTPS model download | MIT OR Apache-2.0 |
+| anyhow / thiserror | Error handling | MIT OR Apache-2.0 / MIT OR Apache-2.0 |
+| parking_lot | OCR engine mutex | MIT OR Apache-2.0 |
+| egui_extras | Image loaders | MIT OR Apache-2.0 |
+
+Run `cargo tree` and consult each crate’s `LICENSE*` files in the Cargo registry for authoritative texts.
+
+## Trademark note
+
+“PDF” is a registered trademark of Adobe. This project is not affiliated with Adobe.

@@ -1,0 +1,34 @@
+# Small Rust PDF Opener
+
+> Local-first Rust PDF viewer/editor: scroll, crop, compress, visual + PKCS#12 signing, opt-in offline OCR. AGPL-3.0 (MuPDF).
+
+## Summary
+
+Small Rust PDF Opener is an open-source desktop application written in Rust. It opens PDFs with MuPDF, provides continuous page scrolling in an egui UI, and supports light editing (delete/rotate/reorder/crop), compression presets, visual signature stamps, certificate-based PKCS#7 signing via PKCS#12 keys, and optional local OCR using ocrs neural models that the user can download on demand.
+
+## Links
+
+- Repository: https://github.com/will702/small-rust-pdf-opener
+- License: AGPL-3.0 (LICENSE)
+- Attributions: NOTICE
+- Citation: CITATION.cff
+
+## Build
+
+```
+cargo build --release
+cargo run --release -- file.pdf
+```
+
+Requires Rust 1.85+, clang/C toolchain for mupdf-sys.
+
+## Key crates
+
+- mupdf 0.8 (AGPL) — render/edit/compress
+- eframe/egui 0.35 — UI
+- ocrs 0.10 + rten 0.21 — OCR
+- lopdf 0.34 + openssl 0.10 — cert signing
+
+## Privacy
+
+Documents stay local. OCR models download only when requested by the user.
