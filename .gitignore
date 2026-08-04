@@ -10,3 +10,4 @@ testdata/*.signed.pdf
 testdata/*.compressed.pdf
 *.dmg
 AppIcon.iconset/
+packaging/AppIcon.icns
