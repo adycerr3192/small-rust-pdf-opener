@@ -41,6 +41,12 @@ Upstream licenses and copyrights remain with their respective authors.
 - License: Apache-2.0 (crate); OpenSSL license / Apache-2.0 depending on vendored version
 - Used for: PKCS#12 import and PKCS#7 detached signatures
 
+## anydoc (optional, `--features anydoc-export`)
+
+- Project: https://github.com/firecrawl/anydoc
+- License: MIT
+- Used for: structured PDF → GitHub-Flavored Markdown export (via pdf-inspector)
+
 ## Other crates
 
 | Crate | Typical use | License (see crates.io) |

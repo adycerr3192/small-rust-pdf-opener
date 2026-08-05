@@ -1133,14 +1133,22 @@ impl PdfApp {
             egui::Window::new("Export text")
                 .collapsible(false)
                 .show(ctx, |ui| {
-                    ui.label("Export embedded PDF text to Markdown or Word.");
+                    if export::ANYDOC_MARKDOWN {
+                        ui.label("Markdown via anydoc (structured GFM). Word still uses MuPDF text.");
+                    } else {
+                        ui.label("Export embedded PDF text to Markdown or Word.");
+                    }
                     ui.label("For scanned pages, run OCR… first.");
                     ui.horizontal(|ui| {
                         ui.label("Format");
                         ui.selectable_value(
                             &mut self.export_format,
                             ExportFormat::Markdown,
-                            "Markdown (.md)",
+                            if export::ANYDOC_MARKDOWN {
+                                "Markdown (.md, anydoc)"
+                            } else {
+                                "Markdown (.md)"
+                            },
                         );
                         ui.selectable_value(
                             &mut self.export_format,
@@ -1784,13 +1792,6 @@ impl PdfApp {
                 return;
             }
         };
-        let page_texts = match export::collect_page_texts(session, &pages) {
-            Ok(t) => t,
-            Err(e) => {
-                self.error = Some(e.to_string());
-                return;
-            }
-        };
         let stem = self
             .session
             .as_ref()
@@ -1819,17 +1820,63 @@ impl PdfApp {
         else {
             return;
         };
+
         let result = match self.export_format {
-            ExportFormat::Markdown => export::write_markdown(&title, &page_texts, &out),
-            ExportFormat::Docx => export::write_docx(&title, &page_texts, &out),
+            #[cfg(feature = "anydoc-export")]
+            ExportFormat::Markdown => self.export_markdown_anydoc(&title, &pages, count, &out),
+            #[cfg(not(feature = "anydoc-export"))]
+            ExportFormat::Markdown => {
+                let page_texts = match export::collect_page_texts(session, &pages) {
+                    Ok(t) => t,
+                    Err(e) => {
+                        self.error = Some(e.to_string());
+                        return;
+                    }
+                };
+                export::write_markdown(&title, &page_texts, &out)
+            }
+            ExportFormat::Docx => {
+                let page_texts = match export::collect_page_texts(session, &pages) {
+                    Ok(t) => t,
+                    Err(e) => {
+                        self.error = Some(e.to_string());
+                        return;
+                    }
+                };
+                export::write_docx(&title, &page_texts, &out)
+            }
         };
         match result {
             Ok(()) => {
-                self.status = format!("Exported → {}", out.display());
+                let backend = if matches!(self.export_format, ExportFormat::Markdown)
+                    && export::ANYDOC_MARKDOWN
+                {
+                    " (anydoc)"
+                } else {
+                    ""
+                };
+                self.status = format!("Exported{backend} → {}", out.display());
                 self.show_export = false;
             }
             Err(e) => self.error = Some(e.to_string()),
         }
+    }
+
+    #[cfg(feature = "anydoc-export")]
+    fn export_markdown_anydoc(
+        &self,
+        title: &str,
+        pages: &[usize],
+        page_count: usize,
+        out: &std::path::Path,
+    ) -> crate::error::Result<()> {
+        let src = self.materialize_session_path().map_err(crate::error::AppError::msg)?;
+        let (pdf, is_temp) = export::pdf_for_page_selection(&src, pages, page_count)?;
+        let result = export::write_markdown_anydoc(title, &pdf, out);
+        if is_temp {
+            let _ = std::fs::remove_file(&pdf);
+        }
+        result
     }
 
     /// Path to current document bytes on disk (writes a temp file when dirty / unsaved).

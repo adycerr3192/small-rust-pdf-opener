@@ -180,7 +180,7 @@ Produces `dist/PDF Opener.app` and `dist/PDF-Opener-<version>.dmg`. Drag into Ap
 | Append | **Append PDF…** → pick files to add to the open document |
 | Split | **Split…** → ranges like `1-2,4` → each range becomes a file |
 | Extract | **Extract…** → page range → one new PDF (optional reopen) |
-| Export | **Export…** → Markdown or Word → page range → `.md` / `.docx` |
+| Export | **Export…** → Markdown or Word → page range → `.md` / `.docx` (optional `--features anydoc-export` for structured Markdown via [anydoc](https://github.com/firecrawl/anydoc)) |
 | OCR | **OCR…** → download models once → this page / all / range; boxes + text overlay; Cancel supported |
 
 ## Project layout
@@ -212,6 +212,7 @@ This project stands on open-source libraries. **Cite and respect their licenses.
 | PDF COS surgery | [`lopdf`](https://crates.io/crates/lopdf) | Signature dictionary / AcroForm wiring | MIT |
 | Crypto | [`openssl`](https://crates.io/crates/openssl) (vendored) | PKCS#12 parse, PKCS#7 detached sign | Apache-2.0 |
 | Dialogs / images | [`rfd`](https://crates.io/crates/rfd), [`image`](https://crates.io/crates/image) | File pickers, PNG/JPEG | MIT / Apache-2.0 |
+| Markdown export (optional) | [`anydoc`](https://github.com/firecrawl/anydoc) | Structured GFM from PDF (`anydoc-export` feature) | MIT |
 
 Full third-party notice: [NOTICE](NOTICE). Formal citation: [CITATION.cff](CITATION.cff).
 
