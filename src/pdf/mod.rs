@@ -3,8 +3,8 @@
 use std::path::{Path, PathBuf};
 
 use mupdf::pdf::{
-    InsertImageOptions, InsertPosition, PageImageSource, PageSelection, PdfDocument,
-    PdfWriteOptions,
+    InsertImageOptions, InsertPdfOptions, InsertPosition, PageImageSource, PageSelection,
+    PdfDocument, PdfWriteOptions,
 };
 use mupdf::{Colorspace, Image, Matrix, Point, Rect, TextExtractOptions};
 
@@ -60,6 +60,16 @@ impl DocumentSession {
         let doc = PdfDocument::open(path)?;
         Ok(Self {
             path: Some(path.to_path_buf()),
+            doc,
+            dirty: false,
+        })
+    }
+
+    /// Open a PDF from in-memory bytes (no path).
+    pub fn from_bytes(bytes: &[u8]) -> Result<Self> {
+        let doc = PdfDocument::from_bytes(bytes)?;
+        Ok(Self {
+            path: None,
             doc,
             dirty: false,
         })
@@ -273,6 +283,51 @@ impl DocumentSession {
         self.dirty = true;
         Ok(())
     }
+
+    /// Append all pages from another PDF onto the end of this document.
+    pub fn append_pdf(&mut self, path: impl AsRef<Path>) -> Result<()> {
+        let src = PdfDocument::open(path.as_ref())?;
+        self.doc.insert_pdf(
+            &src,
+            InsertPdfOptions {
+                source_pages: PageSelection::All,
+                target: InsertPosition::Append,
+                ..InsertPdfOptions::default()
+            },
+        )?;
+        self.dirty = true;
+        Ok(())
+    }
+}
+
+/// Merge multiple PDF files in order into a new file at `out`.
+pub fn merge_files_to_path(paths: &[PathBuf], out: impl AsRef<Path>) -> Result<()> {
+    if paths.len() < 2 {
+        return Err(AppError::msg("Select at least two PDFs to merge"));
+    }
+    let mut session = DocumentSession::open(&paths[0])?;
+    for path in &paths[1..] {
+        session.append_pdf(path)?;
+    }
+    session.save_as(out.as_ref(), CompressPreset::Balanced.write_options())?;
+    Ok(())
+}
+
+/// Export selected 0-based pages from `src` into a new PDF at `out`.
+pub fn export_pages_to_path(
+    src: impl AsRef<Path>,
+    pages: &[usize],
+    out: impl AsRef<Path>,
+) -> Result<()> {
+    if pages.is_empty() {
+        return Err(AppError::msg("No pages selected to export"));
+    }
+    let mut session = DocumentSession::open(src.as_ref())?;
+    session
+        .doc
+        .select_pages(PageSelection::Pages(pages.to_vec()))?;
+    session.save_as(out.as_ref(), CompressPreset::Balanced.write_options())?;
+    Ok(())
 }
 
 pub struct RenderedPage {

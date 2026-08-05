@@ -2,14 +2,17 @@
 
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
+use std::sync::Arc;
 
 use eframe::egui;
 use mupdf::Rect as PdfRect;
 
 use crate::error::AppError;
 use crate::ocr;
-use crate::pdf::{CompressPreset, DocumentSession};
+use crate::page_range::{self, pages_filename_suffix};
+use crate::pdf::{self, CompressPreset, DocumentSession};
 use crate::sign::cert::{self, CertIdentity};
 use crate::sign::visual::SignaturePad;
 
@@ -44,11 +47,29 @@ enum ToolMode {
     CertSign,
 }
 
+#[derive(Debug, Clone)]
+struct OcrOverlayLine {
+    text: String,
+    /// Top-left origin, PDF points (y is baseline / bottom of box, matching OcrLine).
+    x: f32,
+    y: f32,
+    width: f32,
+    height: f32,
+}
+
 enum BackgroundMsg {
     OcrProgress(String),
-    OcrDone(Result<Vec<ocr::OcrLine>, String>),
+    OcrPageDone {
+        page: usize,
+        lines: Result<Vec<ocr::OcrLine>, String>,
+    },
+    OcrJobFinished {
+        ok: usize,
+        failed: usize,
+        cancelled: bool,
+    },
     OcrModelsDone(Result<(), String>),
-    Error(String), // reserved for generic bg failures
+    Error(String),
 }
 
 pub struct PdfApp {
@@ -64,6 +85,17 @@ pub struct PdfApp {
     show_compress: bool,
     compress_preset: CompressPreset,
     show_ocr: bool,
+    ocr_range_text: String,
+    ocr_overlays: HashMap<usize, Vec<OcrOverlayLine>>,
+    show_ocr_overlays: bool,
+    ocr_cancel: Option<Arc<AtomicBool>>,
+    show_merge: bool,
+    merge_paths: Vec<PathBuf>,
+    show_split: bool,
+    split_range_text: String,
+    show_extract: bool,
+    extract_range_text: String,
+    extract_open_after: bool,
     /// Cached page textures keyed by page index; invalidated when zoom changes.
     page_textures: HashMap<usize, egui::TextureHandle>,
     texture_zoom: f32,
@@ -107,6 +139,17 @@ impl Default for PdfApp {
             show_compress: false,
             compress_preset: CompressPreset::Balanced,
             show_ocr: false,
+            ocr_range_text: String::new(),
+            ocr_overlays: HashMap::new(),
+            show_ocr_overlays: true,
+            ocr_cancel: None,
+            show_merge: false,
+            merge_paths: Vec::new(),
+            show_split: false,
+            split_range_text: String::new(),
+            show_extract: false,
+            extract_range_text: String::new(),
+            extract_open_after: true,
             page_textures: HashMap::new(),
             texture_zoom: 0.0,
             scroll_to_page: None,
@@ -146,6 +189,7 @@ impl PdfApp {
                 self.status = format!("Opened {}", path.display());
                 self.page = 0;
                 self.session = Some(session);
+                self.ocr_overlays.clear();
                 self.invalidate_textures();
                 self.scroll_to_page = Some(0);
                 self.search_hits.clear();
@@ -294,29 +338,57 @@ impl PdfApp {
                         Err(e) => self.error = Some(e),
                     }
                 }
-                BackgroundMsg::OcrDone(res) => {
+                BackgroundMsg::OcrPageDone { page, lines } => match lines {
+                    Ok(lines) => self.apply_ocr_lines(page, lines),
+                    Err(e) => {
+                        self.status = format!("OCR failed on page {}: {e}", page + 1);
+                    }
+                },
+                BackgroundMsg::OcrJobFinished {
+                    ok,
+                    failed,
+                    cancelled,
+                } => {
                     self.busy = false;
-                    match res {
-                        Ok(lines) => self.apply_ocr_lines(lines),
-                        Err(e) => self.error = Some(e),
+                    self.ocr_cancel = None;
+                    self.show_ocr_overlays = true;
+                    if cancelled {
+                        self.status = format!(
+                            "OCR cancelled — {ok} page(s) done, {failed} failed"
+                        );
+                    } else if failed > 0 {
+                        self.status =
+                            format!("OCR finished — {ok} ok, {failed} failed");
+                    } else {
+                        self.status = format!("OCR finished — {ok} page(s)");
                     }
                 }
                 BackgroundMsg::Error(e) => {
                     self.busy = false;
+                    self.ocr_cancel = None;
                     self.error = Some(e);
                 }
             }
         }
     }
 
-    fn apply_ocr_lines(&mut self, lines: Vec<ocr::OcrLine>) {
+    fn apply_ocr_lines(&mut self, page: usize, lines: Vec<ocr::OcrLine>) {
         let Some(session) = self.session.as_mut() else {
             return;
         };
-        // Lines arrive in PDF points with top-left origin (OCR thread already unscaled).
-        let Ok((_, page_h)) = session.page_size(self.page) else {
+        let Ok((_, page_h)) = session.page_size(page) else {
             return;
         };
+        let overlays: Vec<OcrOverlayLine> = lines
+            .iter()
+            .map(|l| OcrOverlayLine {
+                text: l.text.clone(),
+                x: l.x,
+                y: l.y,
+                width: l.width,
+                height: l.height,
+            })
+            .collect();
         let mapped: Vec<(String, f32, f32, f32)> = lines
             .into_iter()
             .map(|l| {
@@ -326,16 +398,28 @@ impl PdfApp {
                 (l.text, pdf_x, pdf_y, fontsize)
             })
             .collect();
-        match session.add_ocr_text(self.page, &mapped) {
+        match session.add_ocr_text(page, &mapped) {
             Ok(()) => {
-                self.status = format!("OCR added {} text lines", mapped.len());
+                self.ocr_overlays.insert(page, overlays);
+                self.status = format!(
+                    "OCR added {} text lines on page {}",
+                    mapped.len(),
+                    page + 1
+                );
                 self.invalidate_textures();
             }
             Err(e) => self.error = Some(e.to_string()),
         }
     }
 
-    fn start_ocr_page(&mut self) {
+    fn start_ocr_pages(&mut self, pages: Vec<usize>) {
+        if pages.is_empty() {
+            return;
+        }
+        if self.busy {
+            self.error = Some("Another job is already running".into());
+            return;
+        }
         if !ocr::models_installed() {
             self.error = Some("Download OCR models first (OCR panel)".into());
             self.show_ocr = true;
@@ -344,47 +428,109 @@ impl PdfApp {
         let Some(session) = self.session.as_ref() else {
             return;
         };
-        let page = self.page;
-        let zoom = 2.0; // Higher res for OCR
-        let rendered = match session.render_page(page, zoom) {
-            Ok(r) => r,
+        let bytes = match session.write_bytes(CompressPreset::Balanced.write_options()) {
+            Ok(b) => b,
             Err(e) => {
                 self.error = Some(e.to_string());
                 return;
             }
         };
+        let cancel = Arc::new(AtomicBool::new(false));
+        self.ocr_cancel = Some(cancel.clone());
         self.busy = true;
-        self.status = "Running OCR…".into();
+        self.status = format!("OCR page 1 / {}…", pages.len());
         let tx = self.bg_tx.clone();
+        let total = pages.len();
         std::thread::spawn(move || {
-            let result = ocr::recognize_rgba(rendered.width, rendered.height, &rendered.rgba)
+            let zoom = 2.0f32;
+            let session = match DocumentSession::from_bytes(&bytes) {
+                Ok(s) => s,
+                Err(e) => {
+                    let _ = tx.send(BackgroundMsg::Error(e.to_string()));
+                    return;
+                }
+            };
+            let mut ok = 0usize;
+            let mut failed = 0usize;
+            let mut cancelled = false;
+            for (i, page) in pages.into_iter().enumerate() {
+                if cancel.load(Ordering::Relaxed) {
+                    cancelled = true;
+                    break;
+                }
+                let _ = tx.send(BackgroundMsg::OcrProgress(format!(
+                    "OCR page {} / {}…",
+                    i + 1,
+                    total
+                )));
+                let result = (|| {
+                    let rendered = session.render_page(page, zoom)?;
+                    let lines = ocr::recognize_rgba(rendered.width, rendered.height, &rendered.rgba)?;
+                    Ok::<_, AppError>(
+                        lines
+                            .into_iter()
+                            .map(|mut l| {
+                                l.x /= zoom;
+                                l.y /= zoom;
+                                l.width /= zoom;
+                                l.height /= zoom;
+                                l
+                            })
+                            .collect::<Vec<_>>(),
+                    )
+                })()
                 .map_err(|e| e.to_string());
-            // Scale line coords from OCR zoom to current display is handled in apply
-            // using self.zoom — fix: store OCR zoom in lines by scaling to page space here.
-            let result = result.map(|lines| {
-                lines
-                    .into_iter()
-                    .map(|mut l| {
-                        // Convert to zoom=1 pixel space (= PDF points from top)
-                        l.x /= zoom;
-                        l.y /= zoom;
-                        l.height /= zoom;
-                        l
-                    })
-                    .collect::<Vec<_>>()
+                match &result {
+                    Ok(_) => ok += 1,
+                    Err(_) => failed += 1,
+                }
+                let _ = tx.send(BackgroundMsg::OcrPageDone { page, lines: result });
+            }
+            let _ = tx.send(BackgroundMsg::OcrJobFinished {
+                ok,
+                failed,
+                cancelled,
             });
-            let _ = tx.send(BackgroundMsg::OcrDone(result));
         });
     }
 
+    fn start_ocr_page(&mut self) {
+        self.start_ocr_pages(vec![self.page]);
+    }
+
+    fn start_ocr_all_pages(&mut self) {
+        let count = self.page_count();
+        if count == 0 {
+            return;
+        }
+        self.start_ocr_pages((0..count).collect());
+    }
+
+    fn start_ocr_range(&mut self) {
+        let count = self.page_count();
+        match page_range::parse_page_ranges(&self.ocr_range_text, count) {
+            Ok(pages) => self.start_ocr_pages(pages),
+            Err(e) => self.error = Some(e),
+        }
+    }
+
+    fn cancel_ocr(&mut self) {
+        if let Some(c) = &self.ocr_cancel {
+            c.store(true, Ordering::Relaxed);
+            self.status = "Cancelling OCR…".into();
+        }
+    }
+
     fn download_ocr_models(&mut self) {
+        if self.busy {
+            self.error = Some("Another job is already running".into());
+            return;
+        }
         self.busy = true;
         self.status = "Downloading OCR models…".into();
         let tx = self.bg_tx.clone();
         std::thread::spawn(move || {
-            let mut last = String::new();
             let res = ocr::download_models(&mut |s| {
-                last = s.to_string();
                 let _ = tx.send(BackgroundMsg::OcrProgress(s.to_string()));
             })
             .map_err(|e| e.to_string());
@@ -525,6 +671,27 @@ impl PdfApp {
             ui.selectable_value(&mut self.mode, ToolMode::CertSign, "Cert sign");
             if ui.button("Compress…").clicked() {
                 self.show_compress = true;
+            }
+            if ui.button("Merge…").clicked() {
+                self.show_merge = true;
+            }
+            if ui
+                .add_enabled(self.session.is_some() && !self.busy, egui::Button::new("Append PDF…"))
+                .clicked()
+            {
+                self.append_pdfs_dialog();
+            }
+            if ui
+                .add_enabled(self.session.is_some(), egui::Button::new("Split…"))
+                .clicked()
+            {
+                self.show_split = true;
+            }
+            if ui
+                .add_enabled(self.session.is_some(), egui::Button::new("Extract…"))
+                .clicked()
+            {
+                self.show_extract = true;
             }
             if ui.button("OCR…").clicked() {
                 self.show_ocr = true;
@@ -720,8 +887,12 @@ impl PdfApp {
         if self.show_ocr {
             egui::Window::new("OCR")
                 .collapsible(false)
+                .default_width(420.0)
                 .show(ctx, |ui| {
                     ui.label("Local OCR uses downloadable neural models (Latin script).");
+                    ui.label(
+                        "Results embed an invisible searchable layer and show boxes + text on screen.",
+                    );
                     if ocr::models_installed() {
                         ui.colored_label(egui::Color32::DARK_GREEN, "Models installed");
                     } else {
@@ -743,6 +914,57 @@ impl PdfApp {
                         {
                             self.start_ocr_page();
                         }
+                        if ui
+                            .add_enabled(
+                                !self.busy && self.session.is_some() && ocr::models_installed(),
+                                egui::Button::new("OCR all pages"),
+                            )
+                            .clicked()
+                            {
+                                self.start_ocr_all_pages();
+                            }
+                    });
+                    ui.horizontal(|ui| {
+                        ui.label("Range");
+                        ui.add(
+                            egui::TextEdit::singleline(&mut self.ocr_range_text)
+                                .hint_text("1-3,5")
+                                .desired_width(120.0),
+                        );
+                        if ui
+                            .add_enabled(
+                                !self.busy && self.session.is_some() && ocr::models_installed(),
+                                egui::Button::new("OCR range"),
+                            )
+                            .clicked()
+                        {
+                            self.start_ocr_range();
+                        }
+                    });
+                    ui.horizontal(|ui| {
+                        if ui
+                            .add_enabled(self.busy && self.ocr_cancel.is_some(), egui::Button::new("Cancel"))
+                            .clicked()
+                        {
+                            self.cancel_ocr();
+                        }
+                        ui.checkbox(&mut self.show_ocr_overlays, "Show OCR overlays");
+                        if ui.button("Clear overlays").clicked() {
+                            self.ocr_overlays.clear();
+                        }
+                        if ui.button("Copy page text").clicked() {
+                            if let Some(lines) = self.ocr_overlays.get(&self.page) {
+                                let text = lines
+                                    .iter()
+                                    .map(|l| l.text.as_str())
+                                    .collect::<Vec<_>>()
+                                    .join("\n");
+                                ui.ctx().copy_text(text);
+                                self.status = "Copied OCR text for this page".into();
+                            } else {
+                                self.status = "No OCR text on this page".into();
+                            }
+                        }
                         if ui.button("Close").clicked() {
                             self.show_ocr = false;
                         }
@@ -751,6 +973,140 @@ impl PdfApp {
                         ui.spinner();
                         ui.label(&self.status);
                     }
+                    if let Some(lines) = self.ocr_overlays.get(&self.page) {
+                        ui.separator();
+                        ui.label(format!(
+                            "Recognized on page {} ({} lines):",
+                            self.page + 1,
+                            lines.len()
+                        ));
+                        egui::ScrollArea::vertical()
+                            .max_height(160.0)
+                            .show(ui, |ui| {
+                                for line in lines {
+                                    ui.label(&line.text);
+                                }
+                            });
+                    }
+                });
+        }
+
+        if self.show_merge {
+            egui::Window::new("Merge PDFs")
+                .collapsible(false)
+                .default_width(440.0)
+                .show(ctx, |ui| {
+                    ui.label("Pick two or more PDFs. Order is merge order.");
+                    ui.horizontal(|ui| {
+                        if ui
+                            .add_enabled(!self.busy, egui::Button::new("Add files…"))
+                            .clicked()
+                        {
+                            if let Some(paths) = rfd::FileDialog::new()
+                                .add_filter("PDF", &["pdf"])
+                                .pick_files()
+                            {
+                                self.merge_paths.extend(paths);
+                            }
+                        }
+                        if ui.button("Clear list").clicked() {
+                            self.merge_paths.clear();
+                        }
+                    });
+                    egui::ScrollArea::vertical()
+                        .max_height(180.0)
+                        .show(ui, |ui| {
+                            let mut remove = None;
+                            for (i, path) in self.merge_paths.iter().enumerate() {
+                                ui.horizontal(|ui| {
+                                    ui.label(format!("{}. {}", i + 1, path.display()));
+                                    if ui.small_button("✕").clicked() {
+                                        remove = Some(i);
+                                    }
+                                });
+                            }
+                            if let Some(i) = remove {
+                                self.merge_paths.remove(i);
+                            }
+                        });
+                    ui.horizontal(|ui| {
+                        if ui
+                            .add_enabled(
+                                !self.busy && self.merge_paths.len() >= 2,
+                                egui::Button::new("Save merged…"),
+                            )
+                            .clicked()
+                        {
+                            self.run_merge();
+                        }
+                        if ui.button("Close").clicked() {
+                            self.show_merge = false;
+                        }
+                    });
+                });
+        }
+
+        if self.show_split {
+            egui::Window::new("Split PDF")
+                .collapsible(false)
+                .show(ctx, |ui| {
+                    ui.label("Each comma-separated range becomes its own file (e.g. 1-2,4).");
+                    ui.horizontal(|ui| {
+                        ui.label("Ranges");
+                        ui.add(
+                            egui::TextEdit::singleline(&mut self.split_range_text)
+                                .hint_text("1-3,5")
+                                .desired_width(160.0),
+                        );
+                    });
+                    ui.horizontal(|ui| {
+                        if ui
+                            .add_enabled(
+                                !self.busy && self.session.is_some(),
+                                egui::Button::new("Split to files…"),
+                            )
+                            .clicked()
+                        {
+                            self.run_split();
+                        }
+                        if ui.button("Close").clicked() {
+                            self.show_split = false;
+                        }
+                    });
+                });
+        }
+
+        if self.show_extract {
+            egui::Window::new("Extract pages")
+                .collapsible(false)
+                .show(ctx, |ui| {
+                    ui.label("Save selected pages as one new PDF.");
+                    ui.horizontal(|ui| {
+                        ui.label("Pages");
+                        ui.add(
+                            egui::TextEdit::singleline(&mut self.extract_range_text)
+                                .hint_text("1-3,5")
+                                .desired_width(160.0),
+                        );
+                    });
+                    ui.checkbox(
+                        &mut self.extract_open_after,
+                        "Open extracted file in this window",
+                    );
+                    ui.horizontal(|ui| {
+                        if ui
+                            .add_enabled(
+                                !self.busy && self.session.is_some(),
+                                egui::Button::new("Extract…"),
+                            )
+                            .clicked()
+                        {
+                            self.run_extract();
+                        }
+                        if ui.button("Close").clicked() {
+                            self.show_extract = false;
+                        }
+                    });
                 });
         }
 
@@ -867,6 +1223,44 @@ impl PdfApp {
                                     0.0,
                                     egui::Color32::from_rgba_unmultiplied(255, 220, 0, 80),
                                 );
+                            }
+                        }
+
+                        if self.show_ocr_overlays {
+                            if let Some(lines) = self.ocr_overlays.get(&page_idx) {
+                                for line in lines {
+                                    // OcrLine.y is bottom of box in top-left PDF points.
+                                    let top = line.y - line.height;
+                                    let box_rect = egui::Rect::from_min_size(
+                                        egui::pos2(
+                                            rect.min.x + line.x * zoom,
+                                            rect.min.y + top * zoom,
+                                        ),
+                                        egui::vec2(line.width * zoom, line.height * zoom),
+                                    );
+                                    painter.rect_stroke(
+                                        box_rect,
+                                        2.0,
+                                        egui::Stroke::new(
+                                            1.5,
+                                            egui::Color32::from_rgb(30, 120, 220),
+                                        ),
+                                        egui::StrokeKind::Outside,
+                                    );
+                                    painter.rect_filled(
+                                        box_rect,
+                                        2.0,
+                                        egui::Color32::from_rgba_unmultiplied(30, 120, 220, 28),
+                                    );
+                                    let font_size = (line.height * zoom * 0.85).clamp(9.0, 22.0);
+                                    painter.text(
+                                        egui::pos2(box_rect.min.x + 2.0, box_rect.min.y + 1.0),
+                                        egui::Align2::LEFT_TOP,
+                                        &line.text,
+                                        egui::FontId::proportional(font_size),
+                                        egui::Color32::from_rgb(10, 40, 90),
+                                    );
+                                }
                             }
                         }
 
@@ -1132,6 +1526,199 @@ impl PdfApp {
                 self.save();
             }
         }
+    }
+
+    fn append_pdfs_dialog(&mut self) {
+        if self.busy {
+            self.error = Some("Another job is already running".into());
+            return;
+        }
+        let Some(paths) = rfd::FileDialog::new()
+            .add_filter("PDF", &["pdf"])
+            .pick_files()
+        else {
+            return;
+        };
+        if paths.is_empty() {
+            return;
+        }
+        let Some(session) = self.session.as_mut() else {
+            return;
+        };
+        let mut appended = 0usize;
+        for path in &paths {
+            match session.append_pdf(path) {
+                Ok(()) => appended += 1,
+                Err(e) => {
+                    self.error = Some(format!("Append failed ({}): {e}", path.display()));
+                    break;
+                }
+            }
+        }
+        if appended > 0 {
+            self.invalidate_textures();
+            self.status = format!("Appended {appended} PDF(s)");
+        }
+    }
+
+    fn run_merge(&mut self) {
+        if self.busy {
+            self.error = Some("Another job is already running".into());
+            return;
+        }
+        if self.merge_paths.len() < 2 {
+            self.error = Some("Select at least two PDFs to merge".into());
+            return;
+        }
+        let Some(out) = rfd::FileDialog::new()
+            .add_filter("PDF", &["pdf"])
+            .set_file_name("merged.pdf")
+            .save_file()
+        else {
+            return;
+        };
+        match pdf::merge_files_to_path(&self.merge_paths, &out) {
+            Ok(()) => {
+                self.status = format!("Merged → {}", out.display());
+                self.show_merge = false;
+            }
+            Err(e) => self.error = Some(e.to_string()),
+        }
+    }
+
+    fn run_split(&mut self) {
+        if self.busy {
+            self.error = Some("Another job is already running".into());
+            return;
+        }
+        let Some(session) = self.session.as_ref() else {
+            return;
+        };
+        let count = match session.page_count() {
+            Ok(c) => c,
+            Err(e) => {
+                self.error = Some(e.to_string());
+                return;
+            }
+        };
+        let groups = match page_range::parse_page_range_groups(&self.split_range_text, count) {
+            Ok(g) => g,
+            Err(e) => {
+                self.error = Some(e);
+                return;
+            }
+        };
+        let src = match self.materialize_session_path() {
+            Ok(p) => p,
+            Err(e) => {
+                self.error = Some(e);
+                return;
+            }
+        };
+        let Some(dir) = rfd::FileDialog::new().pick_folder() else {
+            return;
+        };
+        let stem = self
+            .session
+            .as_ref()
+            .and_then(|s| s.path.as_ref())
+            .and_then(|p| p.file_stem())
+            .and_then(|s| s.to_str())
+            .unwrap_or("split");
+        let mut written = 0usize;
+        for pages in &groups {
+            let name = format!("{}-{}.pdf", stem, pages_filename_suffix(pages));
+            let out = dir.join(name);
+            match pdf::export_pages_to_path(&src, pages, &out) {
+                Ok(()) => written += 1,
+                Err(e) => {
+                    self.error = Some(format!("Split failed ({}): {e}", out.display()));
+                    return;
+                }
+            }
+        }
+        self.status = format!("Split into {written} file(s) in {}", dir.display());
+        self.show_split = false;
+    }
+
+    fn run_extract(&mut self) {
+        if self.busy {
+            self.error = Some("Another job is already running".into());
+            return;
+        }
+        let Some(session) = self.session.as_ref() else {
+            return;
+        };
+        let count = match session.page_count() {
+            Ok(c) => c,
+            Err(e) => {
+                self.error = Some(e.to_string());
+                return;
+            }
+        };
+        let pages = match page_range::parse_page_ranges(&self.extract_range_text, count) {
+            Ok(p) => p,
+            Err(e) => {
+                self.error = Some(e);
+                return;
+            }
+        };
+        let src = match self.materialize_session_path() {
+            Ok(p) => p,
+            Err(e) => {
+                self.error = Some(e);
+                return;
+            }
+        };
+        let default_name = format!(
+            "{}-{}.pdf",
+            self.session
+                .as_ref()
+                .and_then(|s| s.path.as_ref())
+                .and_then(|p| p.file_stem())
+                .and_then(|s| s.to_str())
+                .unwrap_or("extract"),
+            pages_filename_suffix(&pages)
+        );
+        let Some(out) = rfd::FileDialog::new()
+            .add_filter("PDF", &["pdf"])
+            .set_file_name(&default_name)
+            .save_file()
+        else {
+            return;
+        };
+        match pdf::export_pages_to_path(&src, &pages, &out) {
+            Ok(()) => {
+                self.status = format!("Extracted → {}", out.display());
+                self.show_extract = false;
+                if self.extract_open_after {
+                    self.open_path(out);
+                }
+            }
+            Err(e) => self.error = Some(e.to_string()),
+        }
+    }
+
+    /// Path to current document bytes on disk (writes a temp file when dirty / unsaved).
+    fn materialize_session_path(&self) -> Result<PathBuf, String> {
+        let session = self
+            .session
+            .as_ref()
+            .ok_or_else(|| "No document open".to_string())?;
+        if !session.dirty {
+            if let Some(path) = session.path.clone() {
+                return Ok(path);
+            }
+        }
+        let bytes = session
+            .write_bytes(CompressPreset::Balanced.write_options())
+            .map_err(|e| e.to_string())?;
+        let path = std::env::temp_dir().join(format!(
+            "pdf-opener-export-{}.pdf",
+            std::process::id()
+        ));
+        std::fs::write(&path, bytes).map_err(|e| e.to_string())?;
+        Ok(path)
     }
 }
 

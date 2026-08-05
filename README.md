@@ -1,7 +1,7 @@
 # Small Rust PDF Opener
 
 <p align="center">
-  <img src="docs/images/banner-hero.png" alt="Small Rust PDF Opener — local-first PDF viewer and editor in Rust" width="100%">
+  <img src="docs/images/promo.gif" alt="Promo: local-first PDF viewer — no uploads, scroll, edit, sign, OCR" width="100%">
 </p>
 
 > Fast, local-first PDF viewer and light editor in **Rust** — open, scroll, edit pages, compress, sign, and OCR **without uploading your documents**.
@@ -17,7 +17,7 @@
 
 ## Why this exists
 
-Most PDF tools are either heavy suites or cloud uploaders. **Small Rust PDF Opener** is a single native binary that stays on your machine: view quickly, do a few useful edits, compress, stamp a signature, optionally certify with a PKCS#12 key, and run OCR after you choose to download local models.
+Most PDF tools are either heavy suites or cloud uploaders. **Small Rust PDF Opener** is a single native binary that stays on your machine: view quickly, do a few useful edits, merge/split, compress, stamp a signature, optionally certify with a PKCS#12 key, and run OCR after you choose to download local models.
 
 ## Architecture at a glance
 
@@ -35,14 +35,17 @@ flowchart TB
   MuPDF --> Render[Page RGBA textures]
   Render --> Scroll[Continuous scroll viewer]
   Session --> Edit[Delete Rotate Reorder Crop]
+  Session --> MergeSplit[Merge Append Split Extract]
   Session --> Compress[Compress presets]
   UI --> OCR[OCR module]
   OCR -->|opt-in download| Models[Local ocrs models cache]
   OCR --> TextLayer[Invisible searchable text]
+  OCR --> Overlay[Bounding box overlays]
   UI --> VisualSign[Visual signature stamp]
   UI --> CertSign[PKCS12 to PKCS7]
   CertSign --> Lopdf[lopdf AcroForm Sig]
   Edit --> MuPDF
+  MergeSplit --> MuPDF
   Compress --> MuPDF
   TextLayer --> MuPDF
   VisualSign --> MuPDF
@@ -59,16 +62,21 @@ flowchart LR
     B1[Select page] --> B2[Delete or rotate or crop]
     B2 --> B3[Save As]
   end
+  subgraph mergeSplit [Merge Split]
+    M1[Merge or Append] --> M2[Split or Extract ranges]
+  end
   subgraph sign [Sign]
     C1[Draw or import mark] --> C2[Place on page]
     C3[Load P12] --> C4[Drag signature rect]
     C4 --> C5[Write signed PDF]
   end
   subgraph ocrFlow [OCR]
-    D1[Download models once] --> D2[OCR page]
-    D2 --> D3[Searchable text layer]
+    D1[Download models once] --> D2[OCR page range or all]
+    D2 --> D3[Boxes plus text overlay]
+    D3 --> D4[Searchable text layer]
   end
   view --> edit
+  edit --> mergeSplit
   edit --> sign
   edit --> ocrFlow
 ```
@@ -91,10 +99,11 @@ flowchart LR
 |------|----------------|
 | **View** | Fast MuPDF rendering, continuous scroll, zoom / fit-width, text search, keyboard nav |
 | **Edit** | Delete page, rotate 90°, reorder (move up/down), crop (CropBox), Save / Save As |
+| **Merge / Split** | Merge several PDFs, append into the open doc, split ranges to files, extract pages |
 | **Compress** | Fast / Balanced / Small write presets (deflate, image compress, garbage collect) |
 | **Visual sign** | Draw a signature or import PNG/JPEG and stamp onto a page |
 | **Cert sign** | Import `.p12` / `.pfx`, place a field, embed PKCS#7 detached signature (OpenSSL) |
-| **OCR** | Opt-in download of [ocrs](https://github.com/robertknight/ocrs) neural models; searchable invisible text layer |
+| **OCR** | Opt-in local [ocrs](https://github.com/robertknight/ocrs) models; page / range / whole-doc; bounding boxes + text overlays; invisible searchable layer |
 | **Privacy** | Documents never leave your computer; OCR models download only when you ask |
 
 Out of scope (on purpose): full annotation suites, forms designer, PDF/A conversion, cloud sync.
@@ -165,7 +174,11 @@ Produces `dist/PDF Opener.app` and `dist/PDF-Opener-<version>.dmg`. Drag into Ap
 | Visual sign | Mode **Sign**, draw/import, **Place on page**, click |
 | Cert sign | Mode **Cert sign**, load PKCS#12, **Place & sign**, drag rect |
 | Compress | **Compress…** → preset → save new file |
-| OCR | **OCR…** → download models once → **OCR this page** |
+| Merge | **Merge…** → add 2+ PDFs → **Save merged…** |
+| Append | **Append PDF…** → pick files to add to the open document |
+| Split | **Split…** → ranges like `1-2,4` → each range becomes a file |
+| Extract | **Extract…** → page range → one new PDF (optional reopen) |
+| OCR | **OCR…** → download models once → this page / all / range; boxes + text overlay; Cancel supported |
 
 ## Project layout
 
@@ -173,7 +186,8 @@ Produces `dist/PDF Opener.app` and `dist/PDF-Opener-<version>.dmg`. Drag into Ap
 src/
   main.rs          eframe entry + Dock icon
   app.rs           egui UI, continuous scroll viewer
-  pdf/             MuPDF document session (render/edit/save)
+  page_range.rs    parse `1-3,5` page ranges
+  pdf/             MuPDF document session (render/edit/merge/split/save)
   ocr/             model download + ocrs recognition
   sign/            visual pad + PKCS#12 / PKCS#7 signing
 packaging/         Info.plist + build-dmg.sh
@@ -212,7 +226,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md). Ideas welcome: more OCR languages, bette
 
 ## Discoverability (for humans & AI)
 
-- **One-liner:** Local-first Rust PDF viewer/editor with scroll, crop, compress, visual + PKCS#12 signing, and opt-in offline OCR.
+- **One-liner:** Local-first Rust PDF viewer/editor with scroll, crop, merge/split, compress, visual + PKCS#12 signing, and opt-in offline OCR with visible results.
 - **Topics:** `rust`, `pdf`, `pdf-viewer`, `pdf-editor`, `egui`, `mupdf`, `ocr`, `offline`, `privacy`, `desktop-app`, `agpl`
 - Machine-readable summary: [llms.txt](llms.txt)
 

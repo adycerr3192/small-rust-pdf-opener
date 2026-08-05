@@ -1,6 +1,7 @@
 mod app;
 mod error;
 mod ocr;
+mod page_range;
 mod pdf;
 mod sign;
 

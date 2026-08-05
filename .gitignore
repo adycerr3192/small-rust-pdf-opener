@@ -1,6 +1,8 @@
 # Ignore build / local artifacts
 /target/
 /dist/
+/promo/node_modules/
+/promo/out/
 **/*.rs.bk
 .DS_Store
 *.pdb

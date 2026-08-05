@@ -104,6 +104,7 @@ pub struct OcrLine {
     /// Image / page coords with top-left origin (PDF points after OCR thread scale).
     pub x: f32,
     pub y: f32,
+    pub width: f32,
     pub height: f32,
 }
 
@@ -142,11 +143,13 @@ pub fn recognize_rgba(width: u32, height: u32, rgba: &[u8]) -> Result<Vec<OcrLin
         }
         let mut min_x = f32::MAX;
         let mut min_y = f32::MAX;
+        let mut max_x = f32::MIN;
         let mut max_y = f32::MIN;
         for r in rects {
             let b = r.bounding_rect();
             min_x = min_x.min(b.left() as f32);
             min_y = min_y.min(b.top() as f32);
+            max_x = max_x.max(b.right() as f32);
             max_y = max_y.max(b.bottom() as f32);
         }
         if !min_x.is_finite() {
@@ -156,6 +159,7 @@ pub fn recognize_rgba(width: u32, height: u32, rgba: &[u8]) -> Result<Vec<OcrLin
             text: content,
             x: min_x,
             y: max_y,
+            width: (max_x - min_x).max(1.0),
             height: (max_y - min_y).max(8.0),
         });
     }
