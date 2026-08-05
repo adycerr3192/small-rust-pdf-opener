@@ -36,6 +36,7 @@ flowchart TB
   Render --> Scroll[Continuous scroll viewer]
   Session --> Edit[Delete Rotate Reorder Crop]
   Session --> MergeSplit[Merge Append Split Extract]
+  Session --> Export[Export md docx]
   Session --> Compress[Compress presets]
   UI --> OCR[OCR module]
   OCR -->|opt-in download| Models[Local ocrs models cache]
@@ -100,6 +101,7 @@ flowchart LR
 | **View** | Fast MuPDF rendering, continuous scroll, zoom / fit-width, text search, keyboard nav |
 | **Edit** | Delete page, rotate 90°, reorder (move up/down), crop (CropBox), Save / Save As |
 | **Merge / Split** | Merge several PDFs, append into the open doc, split ranges to files, extract pages |
+| **Export** | Export embedded text to Markdown (`.md`) or Word (`.docx`); run OCR… first for scans |
 | **Compress** | Fast / Balanced / Small write presets (deflate, image compress, garbage collect) |
 | **Visual sign** | Draw a signature or import PNG/JPEG and stamp onto a page |
 | **Cert sign** | Import `.p12` / `.pfx`, place a field, embed PKCS#7 detached signature (OpenSSL) |
@@ -178,6 +180,7 @@ Produces `dist/PDF Opener.app` and `dist/PDF-Opener-<version>.dmg`. Drag into Ap
 | Append | **Append PDF…** → pick files to add to the open document |
 | Split | **Split…** → ranges like `1-2,4` → each range becomes a file |
 | Extract | **Extract…** → page range → one new PDF (optional reopen) |
+| Export | **Export…** → Markdown or Word → page range → `.md` / `.docx` |
 | OCR | **OCR…** → download models once → this page / all / range; boxes + text overlay; Cancel supported |
 
 ## Project layout
@@ -188,6 +191,7 @@ src/
   app.rs           egui UI, continuous scroll viewer
   page_range.rs    parse `1-3,5` page ranges
   pdf/             MuPDF document session (render/edit/merge/split/save)
+  export/          Markdown / Word text export from embedded PDF text
   ocr/             model download + ocrs recognition
   sign/            visual pad + PKCS#12 / PKCS#7 signing
 packaging/         Info.plist + build-dmg.sh

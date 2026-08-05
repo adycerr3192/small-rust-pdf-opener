@@ -115,7 +115,6 @@ impl DocumentSession {
         })
     }
 
-    #[allow(dead_code)]
     pub fn extract_text(&self, page: usize) -> Result<String> {
         let p = self.doc.load_pdf_page(page as i32)?;
         Ok(p.text(TextExtractOptions::default())?)

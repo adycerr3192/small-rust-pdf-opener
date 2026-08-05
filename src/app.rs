@@ -10,11 +10,18 @@ use eframe::egui;
 use mupdf::Rect as PdfRect;
 
 use crate::error::AppError;
+use crate::export;
 use crate::ocr;
 use crate::page_range::{self, pages_filename_suffix};
 use crate::pdf::{self, CompressPreset, DocumentSession};
 use crate::sign::cert::{self, CertIdentity};
 use crate::sign::visual::SignaturePad;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ExportFormat {
+    Markdown,
+    Docx,
+}
 
 const PAGE_GAP: f32 = 16.0;
 const TEXTURE_CACHE_RADIUS: isize = 2;
@@ -96,6 +103,9 @@ pub struct PdfApp {
     show_extract: bool,
     extract_range_text: String,
     extract_open_after: bool,
+    show_export: bool,
+    export_range_text: String,
+    export_format: ExportFormat,
     /// Cached page textures keyed by page index; invalidated when zoom changes.
     page_textures: HashMap<usize, egui::TextureHandle>,
     texture_zoom: f32,
@@ -150,6 +160,9 @@ impl Default for PdfApp {
             show_extract: false,
             extract_range_text: String::new(),
             extract_open_after: true,
+            show_export: false,
+            export_range_text: String::new(),
+            export_format: ExportFormat::Markdown,
             page_textures: HashMap::new(),
             texture_zoom: 0.0,
             scroll_to_page: None,
@@ -693,6 +706,12 @@ impl PdfApp {
             {
                 self.show_extract = true;
             }
+            if ui
+                .add_enabled(self.session.is_some(), egui::Button::new("Export…"))
+                .clicked()
+            {
+                self.show_export = true;
+            }
             if ui.button("OCR…").clicked() {
                 self.show_ocr = true;
             }
@@ -1105,6 +1124,50 @@ impl PdfApp {
                         }
                         if ui.button("Close").clicked() {
                             self.show_extract = false;
+                        }
+                    });
+                });
+        }
+
+        if self.show_export {
+            egui::Window::new("Export text")
+                .collapsible(false)
+                .show(ctx, |ui| {
+                    ui.label("Export embedded PDF text to Markdown or Word.");
+                    ui.label("For scanned pages, run OCR… first.");
+                    ui.horizontal(|ui| {
+                        ui.label("Format");
+                        ui.selectable_value(
+                            &mut self.export_format,
+                            ExportFormat::Markdown,
+                            "Markdown (.md)",
+                        );
+                        ui.selectable_value(
+                            &mut self.export_format,
+                            ExportFormat::Docx,
+                            "Word (.docx)",
+                        );
+                    });
+                    ui.horizontal(|ui| {
+                        ui.label("Pages");
+                        ui.add(
+                            egui::TextEdit::singleline(&mut self.export_range_text)
+                                .hint_text("1-3,5")
+                                .desired_width(160.0),
+                        );
+                    });
+                    ui.horizontal(|ui| {
+                        if ui
+                            .add_enabled(
+                                !self.busy && self.session.is_some(),
+                                egui::Button::new("Export…"),
+                            )
+                            .clicked()
+                        {
+                            self.run_export();
+                        }
+                        if ui.button("Close").clicked() {
+                            self.show_export = false;
                         }
                     });
                 });
@@ -1694,6 +1757,76 @@ impl PdfApp {
                 if self.extract_open_after {
                     self.open_path(out);
                 }
+            }
+            Err(e) => self.error = Some(e.to_string()),
+        }
+    }
+
+    fn run_export(&mut self) {
+        if self.busy {
+            self.error = Some("Another job is already running".into());
+            return;
+        }
+        let Some(session) = self.session.as_ref() else {
+            return;
+        };
+        let count = match session.page_count() {
+            Ok(c) => c,
+            Err(e) => {
+                self.error = Some(e.to_string());
+                return;
+            }
+        };
+        let pages = match page_range::parse_page_ranges(&self.export_range_text, count) {
+            Ok(p) => p,
+            Err(e) => {
+                self.error = Some(e);
+                return;
+            }
+        };
+        let page_texts = match export::collect_page_texts(session, &pages) {
+            Ok(t) => t,
+            Err(e) => {
+                self.error = Some(e.to_string());
+                return;
+            }
+        };
+        let stem = self
+            .session
+            .as_ref()
+            .and_then(|s| s.path.as_ref())
+            .and_then(|p| p.file_stem())
+            .and_then(|s| s.to_str())
+            .unwrap_or("export");
+        let title = self
+            .session
+            .as_ref()
+            .and_then(|s| s.path.as_ref())
+            .and_then(|p| p.file_name())
+            .and_then(|s| s.to_str())
+            .unwrap_or("document.pdf")
+            .to_string();
+        let suffix = pages_filename_suffix(&pages);
+        let (ext, filter_name, filter_exts) = match self.export_format {
+            ExportFormat::Markdown => ("md", "Markdown", &["md"][..]),
+            ExportFormat::Docx => ("docx", "Word", &["docx"][..]),
+        };
+        let default_name = format!("{stem}-{suffix}.{ext}");
+        let Some(out) = rfd::FileDialog::new()
+            .add_filter(filter_name, filter_exts)
+            .set_file_name(&default_name)
+            .save_file()
+        else {
+            return;
+        };
+        let result = match self.export_format {
+            ExportFormat::Markdown => export::write_markdown(&title, &page_texts, &out),
+            ExportFormat::Docx => export::write_docx(&title, &page_texts, &out),
+        };
+        match result {
+            Ok(()) => {
+                self.status = format!("Exported → {}", out.display());
+                self.show_export = false;
             }
             Err(e) => self.error = Some(e.to_string()),
         }
